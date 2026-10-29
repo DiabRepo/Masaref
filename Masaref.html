@@ -113,6 +113,9 @@ h2{font-size:1.05rem;font-weight:600;margin:26px 0 10px}
 .form>*{min-width:0}
 .env .row>b{min-width:0}
 html,body{overflow-x:hidden}
+.dates{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;font-size:.85rem;color:var(--muted)}
+.dates label{display:flex;align-items:center;gap:6px}
+.dates input{border:1px solid var(--line);background:var(--field);color:var(--ink);border-radius:8px;padding:5px 6px;font:inherit;font-size:.85rem;min-width:0;max-width:150px}
 .x.arm{font-size:.82rem;color:#fff;background:var(--red);border-radius:8px;padding:6px 8px}
 .kv{flex:none;font-size:.78rem;color:var(--muted);min-width:52px}
 </style>
@@ -145,6 +148,7 @@ const shiftMonth=(k,n)=>{const[y,m]=k.split('-').map(Number);return monthKey(new
 function normSettings(s){s=s||{};return{
   salary:+s.salary||0, weeks:+s.weeks===5?5:4, updatedAt:+s.updatedAt||0, updatedBy:s.updatedBy||'',
   weekBudgets:(s.weekBudgets&&typeof s.weekBudgets==='object')?s.weekBudgets:{}, pocketId:s.pocketId||'',
+  weekDates:(s.weekDates&&typeof s.weekDates==='object')?s.weekDates:{},
   cats:(Array.isArray(s.cats)?s.cats:[]).map(c=>{const o={id:c.id||rid(),name:String(c.name||'بند'),amount:+c.amount||0,mode:c.mode==='monthly'?'monthly':'weekly',unit:c.unit==='pct'?'pct':'egp',pct:+c.pct||0};
     if(Array.isArray(c.kids)&&c.kids.length)o.kids=c.kids.map(k=>({id:k.id||rid(),name:String(k.name||''),amount:+k.amount||0,unit:k.unit==='pct'?'pct':'egp',pct:+k.pct||0}));return o})}}
 // ids ثابتة للبنود الافتراضية عشان الموبايلين يتفقوا عليها
@@ -171,7 +175,13 @@ const val=(o,sal)=>o.unit==='pct'?sal*(+o.pct||0)/100:o.amount;
 const total=(c,sal)=>c.kids?c.kids.reduce((a,k)=>a+val(k,sal),0):val(c,sal);
 const fmtPct=n=>(+n||0).toLocaleString('ar-EG',{maximumFractionDigits:2});
 const isNow=()=>viewMonth===monthKey(new Date());
-const nowWeek=s=>isNow()?Math.min(Math.ceil(new Date().getDate()/7),s.weeks):1;
+const ymd=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+function weekRange(s,w){
+  const[y,m]=viewMonth.split('-').map(Number), last=new Date(y,m,0).getDate(), st=(w-1)*7+1, en=w===s.weeks?last:Math.min(w*7,last);
+  const auto={from:ymd(new Date(y,m-1,st)),to:ymd(new Date(y,m-1,en))}, o=((s.weekDates||{})[viewMonth]||{})[w];
+  return{from:o?.from||auto.from,to:o?.to||auto.to,auto,custom:!!o};
+}
+const nowWeek=s=>{if(!isNow())return 1;const t=ymd(new Date());for(let w=1;w<=s.weeks;w++){const r=weekRange(s,w);if(t>=r.from&&t<=r.to)return w}return Math.min(Math.ceil(new Date().getDate()/7),s.weeks)};
 const vw=s=>Math.min(viewWeek||nowWeek(s),s.weeks);
 function numbers(b){
   const s=b.settings, ids=new Set(s.cats.map(c=>c.id)), es=monthEntries(b);
@@ -283,10 +293,11 @@ function renderPocket(){
     <div class="stats" style="margin-top:12px"><div>موزّع على الأسابيع<b id="pPlan"></b></div><div>صرفت<b id="pSpent"></b></div><div>الباقي<b id="pLeft"></b></div></div>
   </section>
   <p class="sync" id="pNote"></p>
-  ${Array.from({length:s.weeks},(_,i)=>{const w=i+1,o=wOverride(s,w);return `
+  ${Array.from({length:s.weeks},(_,i)=>{const w=i+1,o=wOverride(s,w),r=weekRange(s,w);return `
   <div class="env">
     <div class="row"><b style="flex:1">الأسبوع ${fmt(w)}${w===cur?' <span style="color:var(--amber);font-weight:400">· دلوقتي</span>':''}</b>
       <input class="amt" inputmode="decimal" data-wb="${w}" value="${o!=null?o:''}" placeholder="${Math.round(total(c,s.salary)/s.weeks)}" aria-label="ميزانية الأسبوع ${w}"></div>
+    <div class="dates"><label>من <input type="date" data-wfrom="${w}" value="${r.from}"></label><label>إلى <input type="date" data-wto="${w}" value="${r.to}"></label>${r.custom?`<button class="link" data-wdauto="${w}">تلقائي</button>`:''}</div>
     <div class="meta" data-wmeta="${w}"></div>
     <div class="prog" data-wprog="${w}"><i></i></div>
     <ul class="list" data-witems="${w}"></ul>
@@ -402,6 +413,7 @@ view.addEventListener('click',async e=>{
   const b=book(), s=b.settings;
   if(tab==='pocket'){
     if(d.pick){s.pocketId=d.pick;touch(b);render();return}
+    if(d.wdauto){const m=s.weekDates[viewMonth];if(m)delete m[d.wdauto];touch(b);render();return}
     if(d.wauto){const m=s.weekBudgets[viewMonth];if(m)delete m[d.wauto];touch(b);render();return}
     if(d.delex){b.deleted[d.delex]=Date.now();delete b.entries[d.delex];persist();pocketNums();return}
     if(d.padd){const w=+d.padd,c=pocketCat(s),ai=view.querySelector(`[data-wamt="${w}"]`),di=view.querySelector(`[data-wdesc="${w}"]`);const a=num(ai.value);if(!a){ai.focus();return}
@@ -425,6 +437,11 @@ view.addEventListener('click',async e=>{
   else if(t.id==='addEnv'){s.cats.push({id:rid(),name:'بند جديد',amount:0,mode:'weekly'});touch(b);render();const l=document.querySelectorAll('#envs .name');l[l.length-1]?.select();return}
   else return;
   touch(b);render();
+});
+view.addEventListener('change',e=>{const t=e.target;
+  if((t.dataset.wfrom||t.dataset.wto)&&tab==='pocket'&&t.value){const b=S.shared,s=b.settings,w=t.dataset.wfrom||t.dataset.wto,m=s.weekDates[viewMonth]||(s.weekDates[viewMonth]={}),r=weekRange(s,+w),cur=m[w]||{from:r.from,to:r.to};
+    if(t.dataset.wfrom)cur.from=t.value;else cur.to=t.value;if(cur.from>cur.to){toast('تاريخ البداية بعد النهاية!');}
+    m[w]=cur;touch(b);render();return}
 });
 view.addEventListener('change',e=>{if(e.target.id==='fileIn'&&e.target.files[0])e.target.files[0].text().then(doImport)});
 window.addEventListener('pagehide',persist);
